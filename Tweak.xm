@@ -47,9 +47,7 @@ static BOOL hapticPlayerInitialized = NO;
 
 @interface UITouch (Private)
 @property (assign,setter=_setHidEvent:,nonatomic) IOHIDEventRef _hidEvent;
-@property (nonatomic, assign) BOOL allowForceOnTouch; 
 @property (nonatomic, retain) NSNumber *pab_force;
-@property (nonatomic, assign) BOOL shouldUsePreviousForce;
 - (CGFloat)_unclampedForce; 
 - (CGFloat)computePressure;
 -(void)_setPressure:(CGFloat)arg1 resetPrevious:(BOOL)arg2;
@@ -92,27 +90,41 @@ void hapticPopVibe(){
     hapticFeedback(3.0, 2.0);
 }
 
-%hook UITouch
-%property (nonatomic, assign) BOOL allowForceOnTouch;
-%property (nonatomic, retain) NSNumber *pab_force;
-%property (nonatomic, assign) BOOL shouldUsePreviousForce;
+static BOOL necessaryToHook(UITouch *touch) {
+    if (touch.pab_force) {
+        return YES;
+    }
+    for (UIGestureRecognizer *gesture in touch.gestureRecognizers) {
+        if ([gesture isKindOfClass:NSClassFromString(@"SBUIForceTouchGestureRecognizer")] ||
+            [gesture isKindOfClass:NSClassFromString(@"UITouchForceGestureRecognizer")] ||
+            [gesture isKindOfClass:NSClassFromString(@"_UIPreviewInteractionGestureRecognizer")])
+        return YES;
+    }
+    return NO;
+}
 
+%hook UITouch
+
+%property (nonatomic, retain) NSNumber *pab_force;
+
+/*
 - (id)init {
     UITouch *orig = %orig;
     orig.pab_force = [NSNumber numberWithFloat:-1.0f];
     return orig;
 }
+*/
 
 - (void)_setHidEvent:(IOHIDEventRef)event {
     %orig;
-    if (!isEnabled) return;
+    if (!isEnabled || !necessaryToHook(self)) return;
     self.pab_force = [NSNumber numberWithFloat:-1.0];
-    [self _setPressure:[self _pressure] resetPrevious:NO];
+    // [self _setPressure:[self _pressure] resetPrevious:NO];
 }
 
 -(void)setPhase:(NSInteger)phase {
     %orig;
-    if (!isEnabled) return;
+    if (!isEnabled || !necessaryToHook(self)) return;
     if ([self phase] == UITouchPhaseEnded || [self phase] == UITouchPhaseCancelled) {
         resetForceVariables();
     } else {
@@ -124,6 +136,7 @@ void hapticPopVibe(){
     }
 }
 
+/*
 -(void)_setPressure:(CGFloat)arg1 resetPrevious:(BOOL)arg2 {
     self.shouldUsePreviousForce = arg2;
     %orig([self _pressure], arg2);
@@ -133,12 +146,10 @@ void hapticPopVibe(){
     %orig;
     touch.pab_force = self.pab_force;
 }
+*/
 
 - (CGFloat)_pressure {
-    if (!isEnabled) return 0;
-    if (![self _supportsForce]) {
-        return (CGFloat)0;
-    }
+    if (!isEnabled || !necessaryToHook(self) || ![self _supportsForce]) return 0;
     if ((CGFloat)[self.pab_force doubleValue] < 0) {
         if (self._hidEvent != nil) {
             if (IOHIDEventGetType(self._hidEvent) == kIOHIDEventTypeDigitizer) {
